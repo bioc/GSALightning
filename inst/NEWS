@@ -1,0 +1,28 @@
+Version 0.99.0
+
+Initial package submitted.
+
+Version 0.99.2
+
+Codes:
+
+Added calls to match.args() for partial matching.
+Added calls to isTRUE() for checking logical inputs.
+Replaces cat() with message().
+
+Vignette:
+
+Tabs are replaced by spaces.
+Added some math notations.
+
+R Dependency:
+
+Package built using R-devel version 3.3.0.
+R Dependecy updated to R (>= 3.3.0) in preparation for next Bioconductor release.
+
+Version 0.99.3
+
+Codes:
+
+All comments removed.
+' \n' are removed at end of messages, or the space before '\n' are removed.
