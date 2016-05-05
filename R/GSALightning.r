@@ -1,4 +1,4 @@
-GSAfunc <- function(eset, fac, nperm, method = c('mean','absmean')) {
+GSAfunc <- function(eset, fac, nperm, method = c('maxmean','mean','absmean')) {
     
     fac <- as.numeric(as.factor(fac))-1
 
@@ -27,7 +27,11 @@ GSAfunc <- function(eset, fac, nperm, method = c('mean','absmean')) {
     resultsMat <- {(MeanX-MeanY)/sqrt(SumXsq-numX*MeanX^2+SumYsq-numY*MeanY^2)}*sqrt((length(fac)-2)/(1/numX+1/numY))
     if (method == 'mean') return(resultsMat)
     else if (method == 'absmean') return( abs(resultsMat) )
-    
+    else if (method == 'maxmean') {
+        resultsMat1 <- pmax(as.matrix(resultsMat),0)
+        resultsMat2 <- -pmin(as.matrix(resultsMat),0)
+        return(ls=list(resultsMat1=resultsMat1,resultsMat2=resultsMat2))
+    }  
 }
 
 pvalFromPermMat <- function (obs, perms) {
@@ -45,7 +49,7 @@ permTestLight <- function(eset, fac, nperm, tests = c('unpaired','paired'), meth
     
 }
 
-GSALight <- function (eset, fac, gs, nperm = NULL, tests = c('unpaired','paired'), method = c('mean','absmean'),
+GSALight <- function (eset, fac, gs, nperm = NULL, tests = c('unpaired','paired'), method = c('maxmean','mean','absmean'),
                       minsize = 1, maxsize = Inf, restandardize = TRUE, npermBreaks = 2000,
                       rmGSGenes = c('stop', 'gene', 'gs'), verbose = TRUE) {
 
@@ -119,29 +123,91 @@ GSALight <- function (eset, fac, gs, nperm = NULL, tests = c('unpaired','paired'
     else obs <- rowtests(as.matrix(eset), fac, method)
 
     if (restandardize) {
-        numCatGenes <- colSums(mat)
-        totCatGenes <- sum(numCatGenes)
-        meanobs <- sum(obs*numCatGenes)/totCatGenes
-        sdobs <- sqrt({sum(numCatGenes*{obs^2}) - totCatGenes*meanobs^2}/(totCatGenes - 1))
+        if (method == 'maxmean') {
+            numCatGenes <- colSums(mat)
+            totCatGenes <- sum(numCatGenes)
+            meanobs1 <- sum(obs$results1*numCatGenes)/totCatGenes
+            sdobs1 <- sqrt({sum(numCatGenes*{obs$results1^2}) - totCatGenes*meanobs1^2}/(totCatGenes - 1))
+            meanobs2 <- sum(obs$results2*numCatGenes)/totCatGenes
+            sdobs2 <- sqrt({sum(numCatGenes*{obs$results2^2}) - totCatGenes*meanobs2^2}/(totCatGenes - 1))
+        }
+        else {
+            numCatGenes <- colSums(mat)
+            totCatGenes <- sum(numCatGenes)
+            meanobs <- sum(obs*numCatGenes)/totCatGenes
+            sdobs <- sqrt({sum(numCatGenes*{obs^2}) - totCatGenes*meanobs^2}/(totCatGenes - 1))
+        }
+    }
+
+    if (restandardize) {
+        if (method == 'maxmean') {
+            obs1 <- as.vector(mat %*% obs$results1)
+            obs2 <- as.vector(mat %*% obs$results2)
+            obs1 <- obsOrig1 <- (obs1/numGenes - meanobs1)/sdobs1
+            obs2 <- obsOrig2 <- (obs2/numGenes - meanobs2)/sdobs2
+            obs <- pmax(obs1,obs2)
+            obs[obs2 > obs1] <- -1*obs[obs2 > obs1]
+            obsOrig <- pmax(obsOrig1,obsOrig2)
+            obsOrig[obsOrig2 > obsOrig1] <- -1*obsOrig[obsOrig2 > obsOrig1]
+            }
+        else {
+            obs <- mat %*% obs
+            obs <- as.vector(obs)
+            obs <- obsOrig <- (obs/numGenes - meanobs)/sdobs*sqrt(numGenes)
+        }
+    }
+    else {
+        if (method == 'maxmean') {
+            obs1 <- as.vector(mat %*% obs$results1)
+            obs2 <- as.vector(mat %*% obs$results2)
+            obsOrig1 <- obs1/numGenes
+            obsOrig2 <- obs2/numGenes
+            obs <- pmax(obs1,obs2)
+            obs[obs2 > obs1] <- -1*obs[obs2 > obs1]
+            obsOrig <- pmax(obsOrig1,obsOrig2)
+            obsOrig[obsOrig2 > obsOrig1] <- -1*obsOrig[obsOrig2 > obsOrig1]
+        }
+        else {
+            obs <- mat %*% obs
+            obs <- as.vector(obs)
+            obsOrig <- obs/numGenes
+        }
     }
     
-    obs <- mat %*% obs
-    obs <- as.vector(obs)
-    obsOrig <- obs/numGenes
-
-    if (restandardize) obs <- (obs/numGenes - meanobs)/sdobs
-    
     if (nperm <= npermBreaks) {
-        if (verbose) message("Running permutation.")
         if (tests == 'paired') permMat <- GSApairedfunc(as.matrix(eset),fac,nperm,method)
         else permMat <- GSAfunc(as.matrix(eset),fac,nperm,method)
         if (restandardize) {
-            meanStar <- colSums(permMat*numCatGenes)/totCatGenes
-            sdStar <- sqrt((colSums({permMat^2}*numCatGenes) - totCatGenes*meanStar^2)/(totCatGenes - 1))
-            permMat <- as.matrix(mat%*%permMat)
-            permMat <- t((t(permMat/numGenes) - meanStar)/sdStar)
+            if (method == 'maxmean') {
+                meanStar1 <- colSums(permMat$resultsMat1*numCatGenes)/totCatGenes
+                sdStar1 <- sqrt((colSums({permMat$resultsMat1^2}*numCatGenes) - totCatGenes*meanStar1^2)/(totCatGenes - 1))
+                permMat1 <- as.matrix(mat%*%permMat$resultsMat1)
+                permMat1 <- t((t(permMat1/numGenes) - meanStar1)/sdStar1)
+
+                meanStar2 <- colSums(permMat$resultsMat2*numCatGenes)/totCatGenes
+                sdStar2 <- sqrt((colSums({permMat$resultsMat2^2}*numCatGenes) - totCatGenes*meanStar2^2)/(totCatGenes - 1))
+                permMat2 <- as.matrix(mat%*%permMat$resultsMat2)
+                permMat2 <- t((t(permMat2/numGenes) - meanStar2)/sdStar2)
+
+                permMat <- pmax(permMat1, permMat2)
+                permMat[permMat2 > permMat1] <- -1 * permMat[permMat2 > permMat1]
+            }
+            else {
+                meanStar <- colSums(permMat*numCatGenes)/totCatGenes
+                sdStar <- sqrt((colSums({permMat^2}*numCatGenes) - totCatGenes*meanStar^2)/(totCatGenes - 1))
+                permMat <- as.matrix(mat%*%permMat)
+                permMat <- t((t(permMat/numGenes) - meanStar)/sdStar)*sqrt(numGenes)
+            }
         }
-        else permMat <- as.matrix(mat%*%permMat)
+        else {
+            if (method == 'maxmean') {
+                permMat1 <- as.matrix(mat%*%permMat$resultsMat1)
+                permMat2 <- as.matrix(mat%*%permMat$resultsMat2)
+                permMat <- pmax(permMat1, permMat2)
+                permMat[permMat2 > permMat1] <- -1 * permMat[permMat2 > permMat1]
+            }
+            else permMat <- as.matrix(mat%*%permMat)
+        }
         pvalSums <- pvalFromPermMat(obs, permMat)
         pval <- pvalSums/nperm
     }
@@ -154,16 +220,41 @@ GSALight <- function (eset, fac, gs, nperm = NULL, tests = c('unpaired','paired'
             if (tests == 'paired') permMat <- GSApairedfunc(as.matrix(eset),fac,ifelse(i!=permBreaks,npermBreaks,nperm-{i-1}*npermBreaks),method)
             else permMat <- GSAfunc(as.matrix(eset),fac,ifelse(i!=permBreaks,npermBreaks,nperm-{i-1}*npermBreaks),method)
             if (restandardize) {
-                meanStar <- colSums(permMat*numCatGenes)/totCatGenes
-                sdStar <- sqrt((colSums({permMat^2}*numCatGenes) - totCatGenes*meanStar^2)/(totCatGenes - 1))
-                permMat <- as.matrix(mat%*%permMat)
-                permMat <- t((t(permMat/numGenes) - meanStar)/sdStar)
+                if (method == 'maxmean') {
+                    meanStar1 <- colSums(permMat$resultsMat1*numCatGenes)/totCatGenes
+                    sdStar1 <- sqrt((colSums({permMat$resultsMat1^2}*numCatGenes) - totCatGenes*meanStar1^2)/(totCatGenes - 1))
+                    permMat1 <- as.matrix(mat%*%permMat$resultsMat1)
+                    permMat1 <- t((t(permMat1/numGenes) - meanStar1)/sdStar1)
+                    
+                    meanStar2 <- colSums(permMat$resultsMat2*numCatGenes)/totCatGenes
+                    sdStar2 <- sqrt((colSums({permMat$resultsMat2^2}*numCatGenes) - totCatGenes*meanStar2^2)/(totCatGenes - 1))
+                    permMat2 <- as.matrix(mat%*%permMat$resultsMat2)
+                    permMat2 <- t((t(permMat2/numGenes) - meanStar2)/sdStar2)
+
+                    permMat <- pmax(permMat1, permMat2)
+                    permMat[permMat2 > permMat1] <- -1 * permMat[permMat2 > permMat1]
+                }
+                else {
+                    meanStar <- colSums(permMat*numCatGenes)/totCatGenes
+                    sdStar <- sqrt((colSums({permMat^2}*numCatGenes) - totCatGenes*meanStar^2)/(totCatGenes - 1))
+                    permMat <- as.matrix(mat%*%permMat)
+                    permMat <- t((t(permMat/numGenes) - meanStar)/sdStar)*sqrt(numGenes)
+                }
             }
-            else permMat <- as.matrix(mat%*%permMat)
+            else {
+                if (method == 'maxmean') {
+                    permMat1 <- as.matrix(mat%*%permMat$resultsMat1)
+                    permMat2 <- as.matrix(mat%*%permMat$resultsMat2)
+                    permMat <- pmax(permMat1, permMat2)
+                    permMat[permMat2 > permMat1] <- -1 * permMat[permMat2 > permMat1]
+                }
+                else permMat <- as.matrix(mat%*%permMat)
+            }
             pvalSums <- pvalSums + pvalFromPermMat(obs, permMat)
         }
         pval <- pvalSums/nperm
     }
+
 
     if (verbose) message("Permutation done. Evaluating P-values.")
     if (method == 'absmean') {
@@ -178,17 +269,15 @@ GSALight <- function (eset, fac, gs, nperm = NULL, tests = c('unpaired','paired'
             fac <- as.numeric(as.factor(fac))-1
             if (sum(fac==1) > sum(fac==0)) lvls <- rev(lvls)
         
-            pvals <- cbind(1-pval,pval)
-            colnames(pvals) <- c(paste('up-regulated in', lvls[2]), paste('up-regulated in',lvls[1]))
+            pvals <- cbind(pval,1-pval)
             rownames(pvals) <- rownames(mat)
         
-            if (sum(fac==1) > sum(fac==0)) pvals <- pvals[,2:1]
             qvals <- cbind(p.adjust(pvals[,1],'BH'),p.adjust(pvals[,2],'BH'))
 
             results <- cbind(pvals,qvals,obsOrig,rowSums(mat))
             colnames(results) <- c(paste('p-value:up-regulated in', lvls[1]), paste('p-value:up-regulated in',lvls[2]),
                                    paste('q-value:up-regulated in', lvls[1]), paste('q-value:up-regulated in',lvls[2]),
-                                   'statistics','# genes')
+                                   paste('statistics: up-regulated in',lvls[2]),'# genes')
         }
         else {
             pvals <- cbind(1-pval,pval)
@@ -197,14 +286,14 @@ GSALight <- function (eset, fac, gs, nperm = NULL, tests = c('unpaired','paired'
             results <- cbind(pvals,qvals,obsOrig,rowSums(mat))
             colnames(results) <- c(paste('p-value:up-regulated in positives'), paste('p-value:up-regulated in negatives'),
                                    paste('q-value:up-regulated in positives'), paste('q-value:up-regulated in negatives'),
-                                   'statistics','# genes')
+                                   'statistics (up-regulated in positives)','# genes')
         }
     }
     results
     
 }
 
-rowtests <- function(eset,fac,method=c('mean','absmean')) {
+rowtests <- function(eset,fac,method=c('maxmean','mean','absmean')) {
     fac <- as.numeric(as.factor(fac))-1
     if (sum(fac==1) > sum(fac==0)) fac <- abs(fac - 1)
     numx <- sum(fac==1)
@@ -218,9 +307,14 @@ rowtests <- function(eset,fac,method=c('mean','absmean')) {
     results <- {mean1-mean2}/sqrt({{var1 + var2}/{length(fac)-2}}*{1/numx+1/numy})
     if (method == 'mean') return( results )
     else if (method == 'absmean') return( abs(results) )
+    else if (method == 'maxmean') {
+        results1 <- pmax(results,0)
+        results2 <- -pmin(results,0)
+        return(ls=list(results1=results1,results2=results2))
+    }
 }
 
-rowPairedTtests <- function(eset, fac, method = c('mean','absmean')) {
+rowPairedTtests <- function(eset, fac, method = c('maxmean','mean','absmean')) {
 
     numSubject <- length(fac)/2
     mat <- Matrix(0,ncol(eset),numSubject)
@@ -233,10 +327,14 @@ rowPairedTtests <- function(eset, fac, method = c('mean','absmean')) {
     
     if (method == 'mean') return(results)
     else if (method == 'absmean') return( abs(results) )
-
+    else if (method == 'maxmean') {
+        results1 <- pmax(results,0)
+        results2 <- -pmin(results,0)
+        return(ls=list(results1=results1,results2=results2))
+    }
 }
 
-GSApairedfunc <- function(eset, fac, nperm, method = c('mean','absmean')) {
+GSApairedfunc <- function(eset, fac, nperm, method = c('maxmean','mean','absmean')) {
 
     numSubject <- length(fac)/2
     mat <- Matrix(0,ncol(eset),numSubject)
@@ -259,7 +357,11 @@ GSApairedfunc <- function(eset, fac, nperm, method = c('mean','absmean')) {
     
     if (method == 'mean') return(resultsMat)
     else if (method == 'absmean') return( abs(resultsMat) )
-
+    else if (method == 'maxmean') {
+        resultsMat1 <- pmax(as.matrix(resultsMat),0)
+        resultsMat2 <- -pmin(as.matrix(resultsMat),0)
+        return(ls=list(resultsMat1=resultsMat1,resultsMat2=resultsMat2))
+        } 
 }
 
 list2DataTable <- function(geneList) {
@@ -277,9 +379,59 @@ dataTable2Mat <- function(gsTable) {
 
     mat <- sparseMatrix(gs,geneFactor,x=1)
 
+    if (any(mat > 1)) {
+        warning("There appears to be duplicated genes in some gene sets. The duplicated genes are removed.")
+        mat[mat > 1] <- 1
+    }
     rownames(mat) <- tmpGS
     colnames(mat) <- tmpGenes
 
     mat
+}
+
+wilcoxTest <- function(eset, fac, tests=c("unpaired","paired")) {
+
+    eset <- as.data.frame(t(eset))
+    facn <- as.numeric(as.factor(fac))-1
+    if (tests == 'unpaired') wilcoxFunc <- function(xx) wilcox.test(x=xx[facn==0],y=xx[facn==1],alternative="greater")$p.value
+    else if (tests == 'paired') {
+        wilcoxFunc <- function(xx) {
+            xxx <- xx[fac >= 1]
+            yy <- xx[fac <= -1]
+            fx <- fac[fac >= 1]
+            fy <- -fac[fac <= -1]
+            wilcox.test(x = xxx[order(fx)], y = yy[order(fy)], paired=TRUE, alternative="greater")$p.value
+        }
+    }
+    pval <- sapply(eset,wilcoxFunc)
+
+    if (tests == 'unpaired') {
+        lvls <- levels(as.factor(fac))
+
+        pvals <- cbind(pval,1-pval)
+        colnames(pvals) <- c(paste('up-regulated in', lvls[1]), paste('up-regulated in',lvls[2]))
+        rownames(pvals) <- colnames(eset)
+        
+        qvals <- cbind(p.adjust(pvals[,1],'BH'),p.adjust(pvals[,2],'BH'))
+    
+        results <- cbind(pvals,qvals)
+        colnames(results) <- c(paste('p-value:up-regulated in', lvls[1]), paste('p-value:up-regulated in',lvls[2]),
+                               paste('q-value:up-regulated in', lvls[1]), paste('q-value:up-regulated in',lvls[2]))
+    }
+    
+    else if (tests == "paired") {
+        pvals <- cbind(pval,1-pval)
+        colnames(pvals) <- c(paste('up-regulated in', 'positives'), paste('up-regulated in','negatives'))
+        rownames(pvals) <- colnames(eset)
+        
+        qvals <- cbind(p.adjust(pvals[,1],'BH'),p.adjust(pvals[,2],'BH'))
+    
+        results <- cbind(pvals,qvals)
+        colnames(results) <- c(paste('p-value:up-regulated in', 'positives'), paste('p-value:up-regulated in','negatives'),
+                               paste('q-value:up-regulated in', 'positives'), paste('q-value:up-regulated in','negatives'))
+    }
+
+    results
+
 }
 
