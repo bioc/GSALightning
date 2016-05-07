@@ -38,3 +38,9 @@ Fix some issues to make GSALight() equivalent to GSA of Efron and Tibshirani.
 The target gene list is now a list instead of a data table.
 The Vignette now contains a comprehensive user guide.
 All documentations are updated accordingly.
+
+Version 1.1.2
+
+Added “importFrom("stats", "p.adjust", "rbinom", "var", "wilcox.test”)” to NAMESPACE
+Import “stats” in description
+Added back manual for “wilcoxTest”
